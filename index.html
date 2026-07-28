@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FDA Recall Watch - Prescription Mart</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+    margin: 0;
+    background: #f5f6f8;
+    color: #222;
+  }
+  header {
+    background: #1B4F8A;
+    color: #fff;
+    padding: 14px 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  header .sub { font-size: 13px; opacity: 0.85; }
+  main { max-width: 1100px; margin: 0 auto; padding: 18px 24px 60px; }
+
+  .panel {
+    background: #fff;
+    border: 1px solid #CCCCCC;
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .panel h2 {
+    margin: 0 0 8px;
+    font-size: 15px;
+    color: #1B4F8A;
+  }
+  .controls-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  textarea#watchlist {
+    width: 100%;
+    min-height: 110px;
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+    font-size: 14px;
+    border: 1px solid #CCCCCC;
+    border-radius: 4px;
+    padding: 8px;
+    resize: vertical;
+  }
+  .hint { font-size: 12.5px; color: #555; margin: 6px 0 0; }
+  button {
+    font-family: inherit;
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid #1B4F8A;
+    background: #1B4F8A;
+    color: #fff;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: #fff;
+    color: #1B4F8A;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  select {
+    font-family: inherit;
+    font-size: 14px;
+    padding: 7px 8px;
+    border: 1px solid #CCCCCC;
+    border-radius: 4px;
+    background: #fff;
+  }
+  #status { font-size: 13.5px; color: #555; }
+  #status.err { color: #B00020; }
+  .last-checked {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1B4F8A;
+    white-space: nowrap;
+  }
+  .recdate {
+    margin-left: auto;
+    font-size: 15px;
+    font-weight: 700;
+    color: #1B4F8A;
+    white-space: nowrap;
+  }
+
+  .summary-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .stat {
+    background: #fff;
+    border: 1px solid #CCCCCC;
+    border-radius: 6px;
+    padding: 10px 18px;
+    min-width: 130px;
+  }
+  .stat .num { font-size: 26px; font-weight: 700; color: #1B4F8A; }
+  .stat .lbl { font-size: 12.5px; color: #555; }
+  .stat.c1 .num { color: #B00020; }
+  .stat.new .num { color: #B4690E; }
+
+  .recall {
+    background: #fff;
+    border: 1px solid #CCCCCC;
+    border-left: 6px solid #999;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+  }
+  .recall.class1 { border-left-color: #B00020; }
+  .recall.class2 { border-left-color: #B4690E; }
+  .recall.class3 { border-left-color: #777; }
+  .recall .top {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .drugname { font-size: 16px; font-weight: 700; color: #1B4F8A; }
+  .badge {
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    color: #fff;
+    background: #777;
+    white-space: nowrap;
+  }
+  .badge.class1 { background: #B00020; }
+  .badge.class2 { background: #B4690E; }
+  .badge.newb { background: #fff; color: #B4690E; border: 1.5px solid #B4690E; }
+  .badge.stat-ongoing { background: #1B4F8A; }
+  .badge.stat-completed, .badge.stat-terminated { background: #6a6a6a; }
+  .recall .field { font-size: 13.5px; margin: 3px 0; }
+  .recall .field b { color: #333; }
+  .recall .desc { font-size: 13.5px; color: #444; margin: 4px 0; }
+  .empty {
+    text-align: center;
+    color: #666;
+    font-size: 14px;
+    padding: 30px 10px;
+  }
+  footer {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px 30px;
+    font-size: 12px;
+    color: #777;
+  }
+  a { color: #1B4F8A; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FDA Recall Watch</h1>
+  <span class="sub">Prescription Mart internal tool. Checks FDA drug recall data for the medications you list below.</span>
+</header>
+
+<main>
+  <div class="panel">
+    <h2>Watch list</h2>
+    <textarea id="watchlist" spellcheck="false"></textarea>
+    <p class="hint">One medication per line. Add the brand name and the generic name as separate lines (example: Humira on one line, adalimumab on the next) so nothing slips past the search. The list starts with roughly 100 of the most commonly prescribed medications. Add or remove lines to match what we actually dispense. The list saves automatically in this browser on this computer.</p>
+  </div>
+
+  <div class="panel">
+    <div class="controls-row">
+      <button id="checkBtn">Check FDA now</button>
+      <label>Look back:
+        <select id="lookback">
+          <option value="90">90 days</option>
+          <option value="180" selected>6 months</option>
+          <option value="365">12 months</option>
+        </select>
+      </label>
+      <button id="markSeenBtn" class="secondary">Mark all as seen</button>
+      <button id="copyBtn" class="secondary">Copy alert for pharmacists</button>
+      <span class="last-checked">Last checked: <span id="lastChecked">never on this computer</span></span>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div class="summary-row" id="summary" style="display:none">
+    <div class="stat"><div class="num" id="statTotal">0</div><div class="lbl">Recalls found</div></div>
+    <div class="stat c1"><div class="num" id="statC1">0</div><div class="lbl">Class I (most serious)</div></div>
+    <div class="stat new"><div class="num" id="statNew">0</div><div class="lbl">New since last check</div></div>
+  </div>
+
+  <div id="results"><div class="empty">No results yet. Click "Check FDA now" to run a check.</div></div>
+</main>
+
+<footer>
+  Data source: FDA openFDA drug enforcement reports (api.fda.gov), public data only. This page is informational. Confirm details on the official FDA recall notice before taking action, and route clinical questions to a pharmacist. Watch list and "seen" memory are saved per browser, per computer. Requires an internet connection to check FDA.
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var LS_LIST = 'pmRecallWatchList';
+  var LS_SEEN = 'pmRecallSeen';
+  var LS_LAST = 'pmRecallLastChecked';
+
+  var STARTER_LIST = [
+    // Cardiovascular and blood pressure
+    'lisinopril', 'losartan', 'valsartan', 'irbesartan', 'olmesartan',
+    'amlodipine', 'metoprolol', 'carvedilol', 'atenolol', 'propranolol',
+    'hydrochlorothiazide', 'furosemide', 'spironolactone', 'diltiazem',
+    'clonidine', 'amiodarone', 'digoxin',
+    // Cholesterol
+    'atorvastatin', 'rosuvastatin', 'simvastatin', 'pravastatin', 'lovastatin',
+    // Blood thinners
+    'apixaban', 'Eliquis', 'rivaroxaban', 'Xarelto', 'clopidogrel', 'warfarin',
+    // Diabetes and weight
+    'metformin', 'glipizide', 'glimepiride', 'pioglitazone',
+    'sitagliptin', 'Januvia', 'empagliflozin', 'Jardiance',
+    'semaglutide', 'Ozempic', 'Wegovy', 'tirzepatide', 'Mounjaro', 'Zepbound',
+    'dulaglutide', 'Trulicity', 'insulin glargine', 'Lantus',
+    'insulin aspart', 'insulin lispro',
+    // Thyroid
+    'levothyroxine', 'Synthroid',
+    // Stomach and reflux
+    'omeprazole', 'pantoprazole', 'esomeprazole', 'famotidine', 'ondansetron',
+    // Mental health and nerve
+    'sertraline', 'escitalopram', 'fluoxetine', 'citalopram', 'duloxetine',
+    'venlafaxine', 'bupropion', 'trazodone', 'quetiapine', 'aripiprazole',
+    'alprazolam', 'hydroxyzine', 'gabapentin', 'lamotrigine', 'levetiracetam',
+    'topiramate',
+    // Pain and inflammation
+    'tramadol', 'meloxicam', 'ibuprofen', 'naproxen', 'cyclobenzaprine',
+    'prednisone', 'hydrocodone', 'oxycodone', 'acetaminophen',
+    // Breathing and allergy
+    'albuterol', 'montelukast', 'fluticasone', 'budesonide', 'tiotropium',
+    // Antibiotics and antivirals
+    'amoxicillin', 'azithromycin', 'doxycycline', 'cephalexin', 'cefdinir',
+    'ciprofloxacin', 'levofloxacin', 'clindamycin', 'nitrofurantoin',
+    // Men's and urology
+    'tamsulosin', 'finasteride', 'sildenafil',
+    // Gout, eyes, other maintenance
+    'allopurinol', 'latanoprost', 'methotrexate', 'hydroxychloroquine',
+    'potassium chloride',
+    // Specialty
+    'adalimumab', 'Humira', 'etanercept', 'Enbrel', 'ustekinumab', 'Stelara',
+    'dupilumab', 'Dupixent', 'apremilast', 'Otezla', 'lenalidomide', 'Revlimid',
+    'ibrutinib', 'Imbruvica'
+  ].join('\n');
+
+  var el = function (id) { return document.getElementById(id); };
+  var listBox = el('watchlist');
+  var statusEl = el('status');
+  var resultsEl = el('results');
+
+  var currentRecalls = [];   // last check results, normalized
+  var seen = loadSeen();
+
+  // ---------- storage ----------
+  function loadSeen() {
+    try { return JSON.parse(localStorage.getItem(LS_SEEN)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveSeen() {
+    try { localStorage.setItem(LS_SEEN, JSON.stringify(seen)); } catch (e) {}
+  }
+  function initList() {
+    var saved = null;
+    try { saved = localStorage.getItem(LS_LIST); } catch (e) {}
+    listBox.value = (saved !== null && saved.trim() !== '') ? saved : STARTER_LIST;
+  }
+  listBox && listBox.addEventListener('input', function () {
+    try { localStorage.setItem(LS_LIST, listBox.value); } catch (e) {}
+  });
+
+  function getTerms() {
+    return listBox.value.split('\n')
+      .map(function (s) { return s.trim(); })
+      .filter(function (s) { return s.length > 1; });
+  }
+
+  // ---------- dates ----------
+  function fmtYmd(d) {
+    var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
+    var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
+    return String(d.getFullYear()) + m + day;
+  }
+  function prettyDate(ymd) {
+    if (!ymd || ymd.length !== 8) return ymd || 'unknown';
+    return ymd.slice(4, 6) + '/' + ymd.slice(6, 8) + '/' + ymd.slice(0, 4);
+  }
+
+  // ---------- FDA query ----------
+  function queryFda(term, startYmd, endYmd) {
+    var search = 'product_description:"' + term + '" AND report_date:[' + startYmd + ' TO ' + endYmd + ']';
+    var url = 'https://api.fda.gov/drug/enforcement.json?search=' +
+      encodeURIComponent(search) + '&sort=report_date:desc&limit=100';
+    return fetch(url).then(function (resp) {
+      if (resp.status === 404) return { results: [] }; // openFDA returns 404 for "no matches"
+      if (resp.status === 429) throw new Error('FDA rate limit hit, wait a minute and try again');
+      if (!resp.ok) throw new Error('FDA returned HTTP ' + resp.status);
+      return resp.json();
+    }).then(function (data) {
+      return (data && data.results) ? data.results : [];
+    });
+  }
+
+  function classRank(c) {
+    if (c === 'Class I') return 0;
+    if (c === 'Class II') return 1;
+    if (c === 'Class III') return 2;
+    return 3;
+  }
+  function classCss(c) {
+    if (c === 'Class I') return 'class1';
+    if (c === 'Class II') return 'class2';
+    if (c === 'Class III') return 'class3';
+    return '';
+  }
+
+  function runCheck() {
+    var terms = getTerms();
+    if (terms.length === 0) {
+      setStatus('Watch list is empty. Add at least one medication.', true);
+      return;
+    }
+    var days = parseInt(el('lookback').value, 10);
+    var end = new Date();
+    var start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+    var startYmd = fmtYmd(start), endYmd = fmtYmd(end);
+
+    el('checkBtn').disabled = true;
+    setStatus('Checking FDA for ' + terms.length + ' medications...', false);
+
+    var failures = [];
+    var byRecallNum = {};
+    var doneCount = 0;
+
+    function checkOne(term) {
+      return queryFda(term, startYmd, endYmd).then(function (results) {
+        results.forEach(function (r) {
+          var key = r.recall_number || (r.recalling_firm + '|' + r.recall_initiation_date + '|' + (r.product_description || '').slice(0, 60));
+          if (!byRecallNum[key]) {
+            byRecallNum[key] = {
+              key: key,
+              terms: [],
+              classification: r.classification || 'Unclassified',
+              status: r.status || 'Unknown',
+              firm: r.recalling_firm || 'Unknown firm',
+              product: r.product_description || '',
+              reason: r.reason_for_recall || '',
+              lots: r.code_info || '',
+              initDate: r.recall_initiation_date || '',
+              reportDate: r.report_date || '',
+              recallNumber: r.recall_number || 'n/a'
+            };
+          }
+          if (byRecallNum[key].terms.indexOf(term) === -1) byRecallNum[key].terms.push(term);
+        });
+      }).catch(function (err) {
+        failures.push(term + ' (' + err.message + ')');
+      }).then(function () {
+        doneCount++;
+        setStatus('Checking FDA... ' + doneCount + ' of ' + terms.length + ' medications done.', false);
+      });
+    }
+
+    // Run in batches of 8 so a long list does not slam FDA's rate limit.
+    var queue = terms.slice();
+    function worker() {
+      var term = queue.shift();
+      if (term === undefined) return Promise.resolve();
+      return checkOne(term).then(worker);
+    }
+    var workers = [];
+    for (var w = 0; w < 8 && w < terms.length; w++) workers.push(worker());
+
+    Promise.all(workers).then(function () {
+      currentRecalls = Object.keys(byRecallNum).map(function (k) { return byRecallNum[k]; });
+      currentRecalls.sort(function (a, b) {
+        var cr = classRank(a.classification) - classRank(b.classification);
+        if (cr !== 0) return cr;
+        return (b.reportDate || '').localeCompare(a.reportDate || '');
+      });
+
+      var now = new Date();
+      try { localStorage.setItem(LS_LAST, now.toLocaleString()); } catch (e) {}
+      el('lastChecked').textContent = now.toLocaleString();
+
+      render();
+      var msg = 'Done. ' + currentRecalls.length + ' recall' + (currentRecalls.length === 1 ? '' : 's') + ' found.';
+      if (failures.length > 0) {
+        msg += ' Could not check: ' + failures.join('; ') + '.';
+        setStatus(msg, true);
+      } else {
+        setStatus(msg, false);
+      }
+      el('checkBtn').disabled = false;
+    });
+  }
+
+  // ---------- render ----------
+  function isNew(r) { return !seen[r.key]; }
+
+  function render() {
+    var total = currentRecalls.length;
+    var c1 = currentRecalls.filter(function (r) { return r.classification === 'Class I'; }).length;
+    var newer = currentRecalls.filter(isNew).length;
+
+    el('summary').style.display = 'flex';
+    el('statTotal').textContent = total;
+    el('statC1').textContent = c1;
+    el('statNew').textContent = newer;
+
+    if (total === 0) {
+      resultsEl.innerHTML = '<div class="empty">No recalls found for the watch list in this window. Good news.</div>';
+      return;
+    }
+
+    resultsEl.innerHTML = '';
+    currentRecalls.forEach(function (r) {
+      var card = document.createElement('div');
+      card.className = 'recall ' + classCss(r.classification);
+
+      var top = document.createElement('div');
+      top.className = 'top';
+
+      var name = document.createElement('span');
+      name.className = 'drugname';
+      name.textContent = r.terms.join(', ');
+      top.appendChild(name);
+
+      var cls = document.createElement('span');
+      cls.className = 'badge ' + classCss(r.classification);
+      cls.textContent = r.classification;
+      top.appendChild(cls);
+
+      var st = document.createElement('span');
+      st.className = 'badge stat-' + String(r.status).toLowerCase();
+      st.textContent = r.status;
+      top.appendChild(st);
+
+      if (isNew(r)) {
+        var nb = document.createElement('span');
+        nb.className = 'badge newb';
+        nb.textContent = 'NEW';
+        top.appendChild(nb);
+      }
+
+      var dt = document.createElement('span');
+      dt.className = 'recdate';
+      dt.textContent = 'Recalled ' + prettyDate(r.initDate || r.reportDate);
+      top.appendChild(dt);
+
+      card.appendChild(top);
+
+      addField(card, 'Product', r.product, 'desc');
+      addField(card, 'Reason', r.reason);
+      addField(card, 'Firm', r.firm);
+      addField(card, 'Initiated', prettyDate(r.initDate) + '   |   Recall #' + r.recallNumber);
+      if (r.lots) addField(card, 'Lots', truncate(r.lots, 220));
+
+      resultsEl.appendChild(card);
+    });
+  }
+
+  function addField(card, label, value, cssClass) {
+    if (!value) return;
+    var p = document.createElement('p');
+    p.className = cssClass || 'field';
+    var b = document.createElement('b');
+    b.textContent = label + ': ';
+    p.appendChild(b);
+    p.appendChild(document.createTextNode(value));
+    card.appendChild(p);
+  }
+
+  function truncate(s, n) {
+    return s.length > n ? s.slice(0, n) + '...' : s;
+  }
+
+  function setStatus(msg, isErr) {
+    statusEl.textContent = msg;
+    statusEl.className = isErr ? 'err' : '';
+  }
+
+  // ---------- actions ----------
+  function markAllSeen() {
+    currentRecalls.forEach(function (r) { seen[r.key] = true; });
+    saveSeen();
+    render();
+    setStatus('All current recalls marked as seen. Next check will only flag newer ones as NEW.', false);
+  }
+
+  function copyAlert() {
+    if (currentRecalls.length === 0) {
+      setStatus('Nothing to copy. Run a check first.', true);
+      return;
+    }
+    var items = currentRecalls.filter(isNew);
+    var heading;
+    if (items.length === 0) { items = currentRecalls; heading = 'Active recalls matching our watch list:'; }
+    else { heading = 'New recalls matching our watch list:'; }
+
+    var lines = [];
+    lines.push('FDA RECALL ALERT - Prescription Mart');
+    lines.push('Checked: ' + new Date().toLocaleString());
+    lines.push('');
+    lines.push(heading);
+    lines.push('');
+    items.forEach(function (r) {
+      lines.push('- ' + r.terms.join(', ') + ' (' + r.classification + ', ' + r.status + '): ' +
+        truncate(r.product, 160) + ' recalled by ' + r.firm + '. Reason: ' +
+        truncate(r.reason, 200) + ' Recall #' + r.recallNumber + ', initiated ' + prettyDate(r.initDate) + '.');
+    });
+    lines.push('');
+    lines.push('Patients on these medications may call with questions. Full details are on the FDA recall listing (fda.gov). Route clinical questions to a pharmacist.');
+
+    var text = lines.join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        setStatus('Alert text copied. Paste it into a message to the pharmacists.', false);
+      }, function () { fallbackCopy(text); });
+    } else {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); setStatus('Alert text copied. Paste it into a message to the pharmacists.', false); }
+    catch (e) { setStatus('Could not copy automatically. Select the text on screen instead.', true); }
+    document.body.removeChild(ta);
+  }
+
+  // ---------- init ----------
+  initList();
+  try {
+    var last = localStorage.getItem(LS_LAST);
+    if (last) el('lastChecked').textContent = last;
+  } catch (e) {}
+
+  el('checkBtn').addEventListener('click', runCheck);
+  el('markSeenBtn').addEventListener('click', markAllSeen);
+  el('copyBtn').addEventListener('click', copyAlert);
+})();
+</script>
+</body>
+</html>
