@@ -382,10 +382,13 @@
 
     Promise.all(workers).then(function () {
       currentRecalls = Object.keys(byRecallNum).map(function (k) { return byRecallNum[k]; });
+      // Newest recall first. Sort on the same date the card displays so the
+      // order always matches what the reader sees.
       currentRecalls.sort(function (a, b) {
-        var cr = classRank(a.classification) - classRank(b.classification);
-        if (cr !== 0) return cr;
-        return (b.reportDate || '').localeCompare(a.reportDate || '');
+        var ad = a.initDate || a.reportDate || '';
+        var bd = b.initDate || b.reportDate || '';
+        if (ad !== bd) return bd.localeCompare(ad);
+        return classRank(a.classification) - classRank(b.classification);
       });
 
       var now = new Date();
@@ -504,22 +507,18 @@
     }
     var items = currentRecalls.filter(isNew);
     var heading;
-    if (items.length === 0) { items = currentRecalls; heading = 'Active recalls matching our watch list:'; }
-    else { heading = 'New recalls matching our watch list:'; }
+    if (items.length === 0) { items = currentRecalls; heading = 'Active FDA recalls on our watch list:'; }
+    else { heading = 'New FDA recalls on our watch list:'; }
 
     var lines = [];
-    lines.push('FDA RECALL ALERT - Prescription Mart');
-    lines.push('Checked: ' + new Date().toLocaleString());
-    lines.push('');
     lines.push(heading);
     lines.push('');
     items.forEach(function (r) {
-      lines.push('- ' + r.terms.join(', ') + ' (' + r.classification + ', ' + r.status + '): ' +
-        truncate(r.product, 160) + ' recalled by ' + r.firm + '. Reason: ' +
-        truncate(r.reason, 200) + ' Recall #' + r.recallNumber + ', initiated ' + prettyDate(r.initDate) + '.');
+      lines.push(r.terms.join(', ') + ' (' + r.classification + ') recalled ' + prettyDate(r.initDate || r.reportDate));
+      lines.push('   ' + truncate(r.reason, 90) + ' | ' + r.firm + ' | #' + r.recallNumber);
     });
     lines.push('');
-    lines.push('Patients on these medications may call with questions. Full details are on the FDA recall listing (fda.gov). Route clinical questions to a pharmacist.');
+    lines.push('Patients on these may call. Details at fda.gov. Clinical questions go to a pharmacist.');
 
     var text = lines.join('\n');
     if (navigator.clipboard && navigator.clipboard.writeText) {
