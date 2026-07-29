@@ -25,11 +25,13 @@ CANDIDATE_FEEDS = [
     "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/medwatch/rss.xml",
     "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
 ]
-PROBE_PAGES = [
-    "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts",
-    "https://www.fda.gov/news-events",
-    "https://www.fda.gov/about-fda/contact-fda",
-    "https://www.fda.gov/drugs/drug-safety-and-availability/drug-recalls",
+PROBE_URLS = [
+    "https://www.fda.gov/",
+    "https://api.fda.gov/drug/enforcement.json?limit=1",
+    "https://content.govdelivery.com/accounts/USFDA/bulletins.rss",
+    "https://content.govdelivery.com/accounts/USFDA/topics/USFDA_48/feed.rss",
+    "https://news.google.com/rss/search?q=FDA+drug+recall&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=%22recall%22%20when:7d%20FDA&hl=en-US&gl=US&ceid=US:en",
 ]
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 OUT = Path(__file__).resolve().parents[2] / "alerts.json"
@@ -75,25 +77,21 @@ def parse(xml_text):
 
 
 def probe_directory():
-    print("All candidates failed. Probing FDA pages for feed or data links:")
-    for url in PROBE_PAGES:
-        print("scanning:", url)
+    print("All candidates failed. Probing alternative sources:")
+    for url in PROBE_URLS:
+        print("trying:", url)
         try:
-            page = http_get(url)
+            body = http_get(url)
         except Exception as e:
-            print("  page failed:", e)
+            print("  failed:", e)
             continue
-        head_feeds = re.findall(r'<link[^>]*application/(?:rss|atom)\+xml[^>]*>', page, re.IGNORECASE)
-        for tag in head_feeds:
-            print("  feed tag:", tag[:300])
-        links = sorted(set(re.findall(r'href="([^"]*(?:rss|feed|\.xml|views/ajax)[^"]*)"', page, re.IGNORECASE)))
-        for l in links[:40]:
-            print("  link:", l[:300])
-        data_refs = sorted(set(re.findall(r'"(/[^"]*(?:views/ajax|datatables)[^"]*)"', page)))
-        for d in data_refs[:20]:
-            print("  data:", d[:300])
-        if not head_feeds and not links and not data_refs:
-            print("  nothing feed-like found")
+        try:
+            items = parse(body)
+            print("  OK, parses as a feed with", len(items), "recent items")
+            for it in items[:3]:
+                print("    item:", it["date"], "|", it["title"][:120])
+        except Exception:
+            print("  OK but not a feed; first 150 chars:", body[:150].replace("\n", " "))
 
 
 def main():
