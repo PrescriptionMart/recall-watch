@@ -20,10 +20,12 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# FDA's own site blocks automated readers (fake 404s to datacenter IPs,
+# confirmed 2026-07-29), so the early-alert source is a news feed search.
+# News coverage is also what actually drives the phone calls.
 CANDIDATE_FEEDS = [
-    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/recalls/rss.xml",
-    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/medwatch/rss.xml",
-    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
+    "https://news.google.com/rss/search?q=FDA+drug+recall&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=%22recall%22%20when:7d%20FDA&hl=en-US&gl=US&ceid=US:en",
 ]
 PROBE_URLS = [
     "https://www.fda.gov/",
@@ -113,6 +115,10 @@ def main():
         if items is None:
             probe_directory()
             sys.exit(1)
+
+    # Only recall stories. The query is broad enough to catch drug news
+    # that has nothing to do with recalls.
+    items = [i for i in items if "recall" in i["title"].lower()]
 
     payload = {
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

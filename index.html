@@ -242,7 +242,7 @@
 </main>
 
 <footer>
-  Source: FDA openFDA drug enforcement database plus FDA's recall announcement feed, public data only, no patient information. Early alerts show announcements FDA has not classified yet, and the same recall may appear again later as a classified entry. Call volume ratings are a rough guide based on how widely a drug is prescribed, not on our dispensing data. Confirm any recall on fda.gov before acting on it, and send clinical questions to a pharmacist.
+  Source: FDA openFDA drug enforcement database plus a news watch for recall coverage, public data only, no patient information. Early alerts are news stories matched to the watch list before FDA posts the classified entry, so confirm them on fda.gov, and the same recall may appear again later as a classified entry. Call volume ratings are a rough guide based on how widely a drug is prescribed, not on our dispensing data. Send clinical questions to a pharmacist.
 </footer>
 
 <script>
@@ -391,14 +391,23 @@
         var text = ((it.title || '') + ' ' + (it.summary || '')).toLowerCase();
         var hits = list.filter(function (t) { return text.indexOf(t.toLowerCase()) !== -1; });
         if (!hits.length) return;
-        var key = 'ea|' + (it.link || it.title);
+        // Cluster by drug and week so ten outlets covering one recall make
+        // one card, and a genuinely new recall months later flags fresh.
+        var dateYmd = (it.date || '').replace(/-/g, '').slice(0, 8);
+        var wk = 0;
+        if (dateYmd.length === 8) {
+          var dt = new Date(+dateYmd.slice(0, 4), +dateYmd.slice(4, 6) - 1, +dateYmd.slice(6, 8));
+          wk = Math.floor(dt.getTime() / 604800000);
+        }
+        var key = 'ea|' + hits.slice().sort().join(',') + '|' + wk;
+        if (found[key]) return; // items arrive newest first, keep that headline
         found[key] = {
           key: key, label: hits.join(', '), tier: tierOf(hits.join(' ')),
           cls: '', earlyAlert: true,
           reason: it.title || '',
           firm: '', product: it.summary || it.title || '',
-          lots: '', num: 'not yet assigned', status: 'Announced',
-          date: (it.date || '').replace(/-/g, '').slice(0, 8),
+          lots: '', num: 'not yet assigned', status: 'In the news',
+          date: dateYmd,
           link: it.link || ''
         };
       });
@@ -664,13 +673,13 @@
     if (r.link) {
       var ll = document.createElement('div');
       var lb = document.createElement('b');
-      lb.textContent = 'FDA notice: ';
+      lb.textContent = 'Coverage: ';
       ll.appendChild(lb);
       var a = document.createElement('a');
       a.href = r.link;
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = 'open the announcement on fda.gov';
+      a.textContent = 'open the news story';
       ll.appendChild(a);
       d.appendChild(ll);
     }
@@ -702,8 +711,8 @@
     if (r.earlyAlert) {
       var title = (r.reason || '').trim();
       if (title.length > 160) title = title.slice(0, 160) + '...';
-      parts.push('Recall heads up: ' + r.label + ', announced ' + pretty(r.date) + '. Just announced, FDA has not classified it yet.');
-      if (title) parts.push('The notice: "' + title + '".');
+      parts.push('Recall heads up: ' + r.label + ', in the news ' + pretty(r.date) + '. FDA has not posted the official entry yet.');
+      if (title) parts.push('Headline: "' + title + '".');
     } else {
       parts.push('Recall heads up: ' + r.label + (r.cls ? ' (' + r.cls + ')' : '') + ', posted ' + pretty(r.date) + '.');
       if (reason) parts.push('Reason: ' + reason + '.');
@@ -711,7 +720,7 @@
     }
     if (r.tier === 'heavy') parts.push('It is everywhere, expect calls.');
     else if (r.tier === 'spec') parts.push('Few patients, but they always call.');
-    parts.push(r.earlyAlert && r.link ? 'Details: ' + r.link : 'Details: fda.gov, recall ' + r.num + '.');
+    parts.push(r.earlyAlert ? 'Watch fda.gov for the official notice.' : 'Details: fda.gov, recall ' + r.num + '.');
     return parts.join(' ');
   }
 
