@@ -112,6 +112,8 @@
   .pill.light { background: #eef1f5; color: #5c6672; border: 1px solid #d8dee6; }
   .pill.newp  { background: #1B4F8A; color: #fff; }
   .pill.c1    { background: #a3172a; color: #fff; }
+  .pill.c2    { background: #fdf3e0; color: #7a4d08; border: 1px solid #edcf95; }
+  .pill.c3    { background: #eef1f5; color: #5c6672; border: 1px solid #d8dee6; }
   .toggle {
     background: none; border: none; color: #1B4F8A;
     font-size: 13px; cursor: pointer; padding: 0; font-weight: 600;
@@ -562,7 +564,9 @@
 
     if (isNew(r)) row.appendChild(pill('newp', 'New'));
     row.appendChild(pill(r.tier === 'heavy' ? 'heavy' : (r.tier === 'spec' ? 'spec' : 'light'), tierLabel(r.tier)));
-    if (r.cls === 'Class I') row.appendChild(pill('c1', 'Class I'));
+    if (r.cls) {
+      row.appendChild(pill(r.cls === 'Class I' ? 'c1' : (r.cls === 'Class II' ? 'c2' : 'c3'), r.cls));
+    }
 
     var sp = document.createElement('span');
     sp.className = 'spacer';
@@ -652,9 +656,9 @@
     }
 
     var parts = [];
-    parts.push('Recall heads up: ' + r.label + ', posted ' + pretty(r.date) + '.');
+    parts.push('Recall heads up: ' + r.label + (r.cls ? ' (' + r.cls + ')' : '') + ', posted ' + pretty(r.date) + '.');
     if (reason) parts.push('Reason: ' + reason + '.');
-    if (r.cls === 'Class I') parts.push('Class I, the serious kind.');
+    if (r.cls === 'Class I') parts.push('That is FDA\'s most serious level.');
     if (r.tier === 'heavy') parts.push('It is everywhere, expect calls.');
     else if (r.tier === 'spec') parts.push('Few patients, but they always call.');
     parts.push('Details: fda.gov, recall ' + r.num + '.');
