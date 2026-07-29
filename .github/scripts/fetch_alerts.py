@@ -4,6 +4,10 @@ These announcements appear days or weeks before the classified entry
 shows up in the enforcement database, so the page uses them as early
 alerts. Public data only. Runs on a schedule via GitHub Actions.
 
+Tries each candidate feed in order and uses the first one that parses
+with items. If every candidate fails, it lists the feed links on FDA's
+RSS directory page in the log so the next fix is quick.
+
 Usage: fetch_alerts.py [source]
   source: optional feed URL or local file path, for testing the parser.
 """
@@ -16,19 +20,20 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-FEED_URL = "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/recalls/rss.xml"
+CANDIDATE_FEEDS = [
+    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/recalls/rss.xml",
+    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/medwatch/rss.xml",
+    "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
+]
+RSS_DIRECTORY = "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 OUT = Path(__file__).resolve().parents[2] / "alerts.json"
 KEEP_DAYS = 60
 MAX_ITEMS = 100
 
 
-def fetch(source):
-    if source and not source.startswith("http"):
-        return Path(source).read_text(encoding="utf-8")
-    req = urllib.request.Request(
-        source or FEED_URL,
-        headers={"User-Agent": "PrescriptionMart-RecallWatch/1.0 (public recall feed reader)"},
-    )
+def http_get(url):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
@@ -64,9 +69,39 @@ def parse(xml_text):
     return items[:MAX_ITEMS]
 
 
+def probe_directory():
+    print("All candidates failed. Probing the FDA RSS directory for feed links:")
+    try:
+        page = http_get(RSS_DIRECTORY)
+        links = sorted(set(re.findall(r'href="([^"]*rss[^"]*)"', page, re.IGNORECASE)))
+        for l in links:
+            print("  found:", l)
+        if not links:
+            print("  no rss links found on the directory page")
+    except Exception as e:
+        print("  probe failed too:", e)
+
+
 def main():
-    source = sys.argv[1] if len(sys.argv) > 1 else None
-    items = parse(fetch(source))
+    if len(sys.argv) > 1:
+        source = sys.argv[1]
+        text = http_get(source) if source.startswith("http") else Path(source).read_text(encoding="utf-8")
+        items = parse(text)
+    else:
+        items = None
+        for url in CANDIDATE_FEEDS:
+            try:
+                candidate_items = parse(http_get(url))
+            except Exception as e:
+                print(f"candidate failed: {url} ({e})")
+                continue
+            print(f"using feed: {url} ({len(candidate_items)} items)")
+            items = candidate_items
+            break
+        if items is None:
+            probe_directory()
+            sys.exit(1)
+
     payload = {
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "items": items,
