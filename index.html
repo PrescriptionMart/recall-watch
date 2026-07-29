@@ -114,6 +114,7 @@
   .pill.c1    { background: #a3172a; color: #fff; }
   .pill.c2    { background: #fdf3e0; color: #7a4d08; border: 1px solid #edcf95; }
   .pill.c3    { background: #eef1f5; color: #5c6672; border: 1px solid #d8dee6; }
+  .pill.early { background: #f3e8fd; color: #6b21a8; border: 1px solid #d8b4fe; }
   .toggle {
     background: none; border: none; color: #1B4F8A;
     font-size: 13px; cursor: pointer; padding: 0; font-weight: 600;
@@ -241,7 +242,7 @@
 </main>
 
 <footer>
-  Source: FDA openFDA drug enforcement database, public data only, no patient information. FDA posts recalls here after classifying them, which can trail a manufacturer's own announcement, so a recall may reach the news before it reaches this page. Call volume ratings are a rough guide based on how widely a drug is prescribed, not on our dispensing data. Confirm any recall on fda.gov before acting on it, and send clinical questions to a pharmacist.
+  Source: FDA openFDA drug enforcement database plus FDA's recall announcement feed, public data only, no patient information. Early alerts show announcements FDA has not classified yet, and the same recall may appear again later as a classified entry. Call volume ratings are a rough guide based on how widely a drug is prescribed, not on our dispensing data. Confirm any recall on fda.gov before acting on it, and send clinical questions to a pharmacist.
 </footer>
 
 <script>
@@ -377,6 +378,32 @@
     var found = {}, failed = 0;
     var groups = batches(list, 15);
 
+    // Early alerts: FDA's announcement feed, fetched by a scheduled job in
+    // this site's repository and saved as alerts.json. These appear days or
+    // weeks before the classified database entry. Missing file (for example
+    // when this page runs as a local file) is fine, we just skip it.
+    var earlyJob = fetch('alerts.json', { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) return null;
+      return r.json();
+    }).then(function (data) {
+      if (!data || !data.items) return;
+      data.items.forEach(function (it) {
+        var text = ((it.title || '') + ' ' + (it.summary || '')).toLowerCase();
+        var hits = list.filter(function (t) { return text.indexOf(t.toLowerCase()) !== -1; });
+        if (!hits.length) return;
+        var key = 'ea|' + (it.link || it.title);
+        found[key] = {
+          key: key, label: hits.join(', '), tier: tierOf(hits.join(' ')),
+          cls: '', earlyAlert: true,
+          reason: it.title || '',
+          firm: '', product: it.summary || it.title || '',
+          lots: '', num: 'not yet assigned', status: 'Announced',
+          date: (it.date || '').replace(/-/g, '').slice(0, 8),
+          link: it.link || ''
+        };
+      });
+    }).catch(function () {});
+
     var jobs = groups.map(function (group) {
       return fetchBatch(group, from, to).then(function (rows) {
         rows.forEach(function (r) {
@@ -402,6 +429,7 @@
         });
       }).catch(function () { failed++; });
     });
+    jobs.push(earlyJob);
 
     Promise.all(jobs).then(function () {
       // Every batch failed. Never let a dead connection look like an all-clear.
@@ -564,7 +592,9 @@
 
     if (isNew(r)) row.appendChild(pill('newp', 'New'));
     row.appendChild(pill(r.tier === 'heavy' ? 'heavy' : (r.tier === 'spec' ? 'spec' : 'light'), tierLabel(r.tier)));
-    if (r.cls) {
+    if (r.earlyAlert) {
+      row.appendChild(pill('early', 'Early alert'));
+    } else if (r.cls) {
       row.appendChild(pill(r.cls === 'Class I' ? 'c1' : (r.cls === 'Class II' ? 'c2' : 'c3'), r.cls));
     }
 
@@ -631,6 +661,19 @@
       line.appendChild(document.createTextNode(pair[1]));
       d.appendChild(line);
     });
+    if (r.link) {
+      var ll = document.createElement('div');
+      var lb = document.createElement('b');
+      lb.textContent = 'FDA notice: ';
+      ll.appendChild(lb);
+      var a = document.createElement('a');
+      a.href = r.link;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'open the announcement on fda.gov';
+      ll.appendChild(a);
+      d.appendChild(ll);
+    }
     c.appendChild(d);
 
     t.addEventListener('click', function () {
@@ -656,12 +699,19 @@
     }
 
     var parts = [];
-    parts.push('Recall heads up: ' + r.label + (r.cls ? ' (' + r.cls + ')' : '') + ', posted ' + pretty(r.date) + '.');
-    if (reason) parts.push('Reason: ' + reason + '.');
-    if (r.cls === 'Class I') parts.push('That is FDA\'s most serious level.');
+    if (r.earlyAlert) {
+      var title = (r.reason || '').trim();
+      if (title.length > 160) title = title.slice(0, 160) + '...';
+      parts.push('Recall heads up: ' + r.label + ', announced ' + pretty(r.date) + '. Just announced, FDA has not classified it yet.');
+      if (title) parts.push('The notice: "' + title + '".');
+    } else {
+      parts.push('Recall heads up: ' + r.label + (r.cls ? ' (' + r.cls + ')' : '') + ', posted ' + pretty(r.date) + '.');
+      if (reason) parts.push('Reason: ' + reason + '.');
+      if (r.cls === 'Class I') parts.push('That is FDA\'s most serious level.');
+    }
     if (r.tier === 'heavy') parts.push('It is everywhere, expect calls.');
     else if (r.tier === 'spec') parts.push('Few patients, but they always call.');
-    parts.push('Details: fda.gov, recall ' + r.num + '.');
+    parts.push(r.earlyAlert && r.link ? 'Details: ' + r.link : 'Details: fda.gov, recall ' + r.num + '.');
     return parts.join(' ');
   }
 
