@@ -436,6 +436,17 @@
       var sum = document.createElement('summary');
       sum.textContent = 'Reviewed earlier (' + seenList.length + ')';
       det.appendChild(sum);
+      var back = document.createElement('button');
+      back.className = 'copyb';
+      back.type = 'button';
+      back.style.margin = '0 0 12px';
+      back.textContent = 'Bring all back';
+      back.addEventListener('click', function () {
+        seenList.forEach(function (r) { delete seen[r.key]; });
+        save(LS_SEEN, seen);
+        render(0);
+      });
+      det.appendChild(back);
       seenList.forEach(function (r, i) { det.appendChild(cardFor(r, 's' + i)); });
       box.appendChild(det);
     }
@@ -490,18 +501,17 @@
     cp.addEventListener('click', function () { copyText(alertTextFor(r), cp); });
     row.appendChild(cp);
 
-    if (isNew(r)) {
-      var got = document.createElement('button');
-      got.className = 'gotit';
-      got.type = 'button';
-      got.textContent = 'Got it';
-      got.addEventListener('click', function () {
-        seen[r.key] = true;
-        save(LS_SEEN, seen);
-        render(0);
-      });
-      row.appendChild(got);
-    }
+    var flip = document.createElement('button');
+    flip.className = 'gotit';
+    flip.type = 'button';
+    flip.textContent = isNew(r) ? 'Got it' : 'Bring back';
+    flip.addEventListener('click', function () {
+      if (isNew(r)) seen[r.key] = true;
+      else delete seen[r.key];
+      save(LS_SEEN, seen);
+      render(0);
+    });
+    row.appendChild(flip);
 
     c.appendChild(row);
 
@@ -534,33 +544,21 @@
     return s;
   }
 
-  // One message, one drug, written the way a person would actually say it.
+  // One message, one drug, short enough to read mid-shift.
   function alertTextFor(r) {
     var reason = (r.reason || '').trim();
     if (reason) {
       reason = reason.charAt(0).toLowerCase() + reason.slice(1);
-      if (reason.length > 160) reason = reason.slice(0, 160) + '...';
-      if (!/[.?!]$/.test(reason)) reason += '.';
+      if (reason.length > 90) reason = reason.slice(0, 90) + '...';
     }
 
     var parts = [];
-    parts.push('Heads up: FDA posted a recall on ' + r.label + ', dated ' + pretty(r.date) + '.');
-    if (reason) {
-      parts.push(r.firm + ' is pulling certain lots. The reason on file: ' + reason);
-    } else {
-      parts.push(r.firm + ' is pulling certain lots. FDA has not listed a reason yet.');
-    }
-    if (r.cls === 'Class I') {
-      parts.push('FDA has it at Class I, their most serious level.');
-    }
-    if (r.tier === 'heavy') {
-      parts.push('This one is everywhere, so expect patients calling to ask if their bottle is on the list.');
-    } else if (r.tier === 'spec') {
-      parts.push('Only a handful of patients are on it, but they are the kind who call.');
-    } else {
-      parts.push('Probably light on phone traffic, but better you hear it here first.');
-    }
-    parts.push('Lot numbers and the full notice are on fda.gov under recall ' + r.num + '.');
+    parts.push('Recall heads up: ' + r.label + ', posted ' + pretty(r.date) + '.');
+    if (reason) parts.push('Reason: ' + reason + '.');
+    if (r.cls === 'Class I') parts.push('Class I, the serious kind.');
+    if (r.tier === 'heavy') parts.push('It is everywhere, expect calls.');
+    else if (r.tier === 'spec') parts.push('Few patients, but they always call.');
+    parts.push('Details: fda.gov, recall ' + r.num + '.');
     return parts.join(' ');
   }
 
