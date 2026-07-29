@@ -1,0 +1,13 @@
+{
+  "name": "Recall Watch",
+  "short_name": "Recalls",
+  "description": "FDA drug recall tracker for the Prescription Mart team",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#eef1f5",
+  "theme_color": "#1B4F8A",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Recall Watch - Prescription Mart</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B4F8A">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Recalls">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
@@ -32,6 +38,7 @@
     align-items: center;
     gap: 18px;
     flex-wrap: wrap;
+    transition: background .45s ease, border-color .45s ease, color .45s ease;
   }
   .verdict .vtext { flex: 1; min-width: 260px; }
   .verdict .vhead { font-size: 23px; font-weight: 700; line-height: 1.2; }
@@ -72,7 +79,9 @@
     border-radius: 10px;
     margin-bottom: 10px;
     overflow: hidden;
+    transition: opacity .25s ease, transform .25s ease;
   }
+  .card.leaving { opacity: 0; transform: translateX(26px); }
   .card.isnew { border-color: #1B4F8A; box-shadow: 0 1px 5px rgba(27,79,138,.13); }
   .card .row {
     display: flex;
@@ -175,6 +184,26 @@
     padding: 0 24px 40px; font-size: 12.5px; color: #78828e; line-height: 1.6;
   }
   .err { color: #a3172a; }
+
+  /* phone layout */
+  @media (max-width: 640px) {
+    header { padding: 13px 16px; }
+    header h1 { font-size: 18px; }
+    main { padding: 14px 12px 50px; }
+    .verdict { padding: 16px 18px; margin-bottom: 14px; }
+    .verdict .vhead { font-size: 19px; }
+    .verdict .vsub { font-size: 13.5px; }
+    .toolbar { gap: 8px; }
+    button { padding: 10px 15px; }
+    .meta { width: 100%; }
+    .card .row { padding: 12px 14px; gap: 8px; }
+    .drug { font-size: 16px; }
+    .when { width: 100%; order: 4; font-size: 13px; }
+    .why { order: 5; }
+    .toggle { order: 6; }
+    button.gotit, button.copyb { order: 7; margin-left: 0; margin-right: 8px; padding: 11px 18px; }
+    footer { padding: 0 14px 34px; }
+  }
 </style>
 </head>
 <body>
@@ -194,6 +223,7 @@
   <div class="toolbar">
     <button id="checkBtn">Check again</button>
     <button id="seenBtn" class="ghost">Mark all seen</button>
+    <button id="notifBtn" class="ghost" style="display:none">Notify me</button>
     <div class="spacer"></div>
     <span class="meta" id="meta"></span>
   </div>
@@ -217,6 +247,9 @@
   'use strict';
 
   var LS_LIST = 'pmRecallList2', LS_SEEN = 'pmRecallSeen2', LS_LAST = 'pmRecallLast2';
+  var LS_NOTIF = 'pmRecallNotif2', LS_NOTIFIED = 'pmRecallNotified2';
+  var RECHECK_MS = 4 * 3600 * 1000;   // recheck every 4 hours while the page is open
+  var STALE_MS = 3600 * 1000;         // recheck on return if the last check is over an hour old
 
   // Call-volume tiers. "heavy" = drugs so widely prescribed that a recall
   // reliably lights up the phones. "spec" = specialty drugs with fewer
@@ -257,10 +290,15 @@
 
   var el = function (id) { return document.getElementById(id); };
   var recalls = [], seen = load(LS_SEEN, {});
+  var notified = load(LS_NOTIFIED, {});
+  var lastFailed = 0;
 
   function load(k, dflt) {
-    try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : dflt; }
-    catch (e) { return dflt; }
+    try {
+      var v = localStorage.getItem(k);
+      if (v === null || v === '') return dflt;
+      try { return JSON.parse(v); } catch (e2) { return v; } // plain strings pass through
+    } catch (e) { return dflt; }
   }
   function save(k, v) {
     try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch (e) {}
@@ -323,6 +361,7 @@
   }
 
   function check() {
+    if (el('checkBtn').disabled) return; // a check is already running
     var list = terms();
     if (!list.length) {
       verdict('busy', 'No medications on the list', 'Open the list below and add some.');
@@ -382,6 +421,7 @@
         return (b.date || '').localeCompare(a.date || '');
       });
       save(LS_LAST, new Date().toISOString());
+      maybeNotify();
       render(failed);
       el('checkBtn').disabled = false;
     });
@@ -417,13 +457,8 @@
         'None on our heaviest drugs, so calls should be light.');
     }
 
-    var last = load(LS_LAST, null);
-    el('meta').innerHTML = '';
-    var m = document.createElement('span');
-    m.textContent = 'Checked ' + (last ? new Date(last).toLocaleString() : 'just now') +
-      (failed ? '  |  ' + failed + ' batch(es) failed to load' : '');
-    if (failed) m.className = 'err';
-    el('meta').appendChild(m);
+    lastFailed = failed;
+    updateMeta();
 
     var box = el('results');
     box.innerHTML = '';
@@ -450,6 +485,61 @@
       seenList.forEach(function (r, i) { det.appendChild(cardFor(r, 's' + i)); });
       box.appendChild(det);
     }
+  }
+
+  function relTime(iso) {
+    if (!iso) return 'never';
+    var s = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (s < 90) return 'just now';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    if (s < 86400) { var h = Math.round(s / 3600); return h + (h === 1 ? ' hour ago' : ' hours ago'); }
+    return new Date(iso).toLocaleString();
+  }
+
+  function updateMeta() {
+    var m = el('meta');
+    m.textContent = 'Checked ' + relTime(load(LS_LAST, null)) +
+      (lastFailed ? '  |  ' + lastFailed + ' batch(es) failed to load' : '');
+    m.className = lastFailed ? 'meta err' : 'meta';
+  }
+
+  // ---- notifications: only fires while the page is open somewhere ----
+  function notifWanted() { return load(LS_NOTIF, false) === true; }
+
+  function updateNotifBtn() {
+    var b = el('notifBtn');
+    if (!('Notification' in window)) { b.style.display = 'none'; return; }
+    b.style.display = '';
+    if (Notification.permission === 'denied') { b.textContent = 'Notifications blocked'; b.disabled = true; }
+    else if (notifWanted() && Notification.permission === 'granted') { b.textContent = 'Notifications on'; b.disabled = false; }
+    else { b.textContent = 'Notify me'; b.disabled = false; }
+  }
+
+  function toggleNotif() {
+    if (!('Notification' in window)) return;
+    if (notifWanted() && Notification.permission === 'granted') {
+      save(LS_NOTIF, false); updateNotifBtn(); return;
+    }
+    Notification.requestPermission().then(function (p) {
+      save(LS_NOTIF, p === 'granted');
+      updateNotifBtn();
+    });
+  }
+
+  function maybeNotify() {
+    if (!('Notification' in window) || Notification.permission !== 'granted' || !notifWanted()) return;
+    var fresh = recalls.filter(function (r) { return isNew(r) && !notified[r.key]; });
+    if (!fresh.length) return;
+    fresh.forEach(function (r) { notified[r.key] = true; });
+    save(LS_NOTIFIED, notified);
+    var heavy = fresh.some(function (r) { return r.tier === 'heavy'; });
+    var body = (fresh.length === 1 ? 'New recall: ' : 'New recalls: ') +
+      fresh.map(function (r) { return r.label.split(',')[0]; }).join(', ') +
+      (heavy ? '. Expect calls.' : '.');
+    try {
+      var n = new Notification('Recall Watch', { body: body });
+      n.onclick = function () { window.focus(); };
+    } catch (e) {}
   }
 
   function namesOf(arr) {
@@ -506,10 +596,19 @@
     flip.type = 'button';
     flip.textContent = isNew(r) ? 'Got it' : 'Bring back';
     flip.addEventListener('click', function () {
-      if (isNew(r)) seen[r.key] = true;
-      else delete seen[r.key];
-      save(LS_SEEN, seen);
-      render(0);
+      if (isNew(r)) {
+        flip.disabled = true;
+        c.classList.add('leaving');
+        setTimeout(function () {
+          seen[r.key] = true;
+          save(LS_SEEN, seen);
+          render(lastFailed);
+        }, 240);
+      } else {
+        delete seen[r.key];
+        save(LS_SEEN, seen);
+        render(lastFailed);
+      }
     });
     row.appendChild(flip);
 
@@ -595,7 +694,20 @@
   el('seenBtn').addEventListener('click', function () {
     recalls.forEach(function (r) { seen[r.key] = true; });
     save(LS_SEEN, seen);
-    render(0);
+    render(lastFailed);
+  });
+  el('notifBtn').addEventListener('click', toggleNotif);
+  updateNotifBtn();
+
+  // Keep itself current: recheck on a timer, recheck when the tab comes
+  // back after sitting idle, and keep the checked-ago clock honest.
+  setInterval(check, RECHECK_MS);
+  setInterval(updateMeta, 60000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    var last = load(LS_LAST, null);
+    if (!last || (Date.now() - new Date(last).getTime()) > STALE_MS) check();
+    else updateMeta();
   });
 
   check(); // check on open, so opening the page is the whole ritual
