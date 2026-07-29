@@ -107,6 +107,26 @@
     background: none; border: none; color: #1B4F8A;
     font-size: 13px; cursor: pointer; padding: 0; font-weight: 600;
   }
+  button.gotit, button.copyb {
+    font-size: 13px;
+    padding: 4px 14px;
+    margin-left: 12px;
+    border: 1px solid #1B4F8A;
+    color: #1B4F8A;
+    background: #fff;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+  button.gotit:hover, button.copyb:hover { background: #eaf0f7; }
+  details.reviewed { margin-top: 20px; }
+  details.reviewed summary {
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    color: #5c6672;
+    padding: 4px 2px 10px;
+  }
+  details.reviewed .card { opacity: .72; }
   .details {
     display: none;
     padding: 0 18px 14px;
@@ -173,7 +193,6 @@
 
   <div class="toolbar">
     <button id="checkBtn">Check again</button>
-    <button id="copyBtn" class="ghost">Copy alert</button>
     <button id="seenBtn" class="ghost">Mark all seen</button>
     <div class="spacer"></div>
     <span class="meta" id="meta"></span>
@@ -408,7 +427,18 @@
 
     var box = el('results');
     box.innerHTML = '';
-    recalls.forEach(function (r, i) { box.appendChild(cardFor(r, i)); });
+    var freshList = recalls.filter(isNew);
+    var seenList = recalls.filter(function (r) { return !isNew(r); });
+    freshList.forEach(function (r, i) { box.appendChild(cardFor(r, 'f' + i)); });
+    if (seenList.length) {
+      var det = document.createElement('details');
+      det.className = 'reviewed';
+      var sum = document.createElement('summary');
+      sum.textContent = 'Reviewed earlier (' + seenList.length + ')';
+      det.appendChild(sum);
+      seenList.forEach(function (r, i) { det.appendChild(cardFor(r, 's' + i)); });
+      box.appendChild(det);
+    }
   }
 
   function namesOf(arr) {
@@ -453,6 +483,26 @@
     t.textContent = 'Details';
     row.appendChild(t);
 
+    var cp = document.createElement('button');
+    cp.className = 'copyb';
+    cp.type = 'button';
+    cp.textContent = 'Copy alert';
+    cp.addEventListener('click', function () { copyText(alertTextFor(r), cp); });
+    row.appendChild(cp);
+
+    if (isNew(r)) {
+      var got = document.createElement('button');
+      got.className = 'gotit';
+      got.type = 'button';
+      got.textContent = 'Got it';
+      got.addEventListener('click', function () {
+        seen[r.key] = true;
+        save(LS_SEEN, seen);
+        render(0);
+      });
+      row.appendChild(got);
+    }
+
     c.appendChild(row);
 
     var d = document.createElement('div');
@@ -484,34 +534,53 @@
     return s;
   }
 
-  function copyAlert() {
-    if (!recalls.length) return;
-    var items = recalls.filter(isNew);
-    if (!items.length) items = recalls;
-    var lines = ['Recall notice, patients may call about these:', ''];
-    items.forEach(function (r) {
-      lines.push(r.label + ' (' + pretty(r.date) + ') - ' +
-        (r.reason.length > 80 ? r.reason.slice(0, 80) + '...' : r.reason));
-    });
-    lines.push('', 'Look up details on fda.gov. Clinical questions go to a pharmacist.');
-    var text = lines.join('\n');
+  // One message, one drug, written the way a person would actually say it.
+  function alertTextFor(r) {
+    var reason = (r.reason || '').trim();
+    if (reason) {
+      reason = reason.charAt(0).toLowerCase() + reason.slice(1);
+      if (reason.length > 160) reason = reason.slice(0, 160) + '...';
+      if (!/[.?!]$/.test(reason)) reason += '.';
+    }
 
+    var parts = [];
+    parts.push('Heads up: FDA posted a recall on ' + r.label + ', dated ' + pretty(r.date) + '.');
+    if (reason) {
+      parts.push(r.firm + ' is pulling certain lots. The reason on file: ' + reason);
+    } else {
+      parts.push(r.firm + ' is pulling certain lots. FDA has not listed a reason yet.');
+    }
+    if (r.cls === 'Class I') {
+      parts.push('FDA has it at Class I, their most serious level.');
+    }
+    if (r.tier === 'heavy') {
+      parts.push('This one is everywhere, so expect patients calling to ask if their bottle is on the list.');
+    } else if (r.tier === 'spec') {
+      parts.push('Only a handful of patients are on it, but they are the kind who call.');
+    } else {
+      parts.push('Probably light on phone traffic, but better you hear it here first.');
+    }
+    parts.push('Lot numbers and the full notice are on fda.gov under recall ' + r.num + '.');
+    return parts.join(' ');
+  }
+
+  function copyText(text, btn) {
+    function flash() {
+      var old = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = old; }, 1600);
+    }
+    function manual() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); flash(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(flash, function () { manual(text); });
-    } else { manual(text); }
-  }
-  function flash() {
-    var b = el('copyBtn'), old = b.textContent;
-    b.textContent = 'Copied';
-    setTimeout(function () { b.textContent = old; }, 1600);
-  }
-  function manual(text) {
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); flash(); } catch (e) {}
-    document.body.removeChild(ta);
+      navigator.clipboard.writeText(text).then(flash, manual);
+    } else { manual(); }
   }
 
   // init
@@ -525,7 +594,6 @@
     save(LS_LIST, el('watchlist').value);
   });
   el('checkBtn').addEventListener('click', check);
-  el('copyBtn').addEventListener('click', copyAlert);
   el('seenBtn').addEventListener('click', function () {
     recalls.forEach(function (r) { seen[r.key] = true; });
     save(LS_SEEN, seen);
