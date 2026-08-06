@@ -14,7 +14,9 @@ Usage: fetch_alerts.py [source]
 import json
 import re
 import sys
+import time
 import email.utils
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -41,10 +43,29 @@ KEEP_DAYS = 60
 MAX_ITEMS = 100
 
 
-def http_get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+def http_get(url, attempts=3):
+    """GET with retries. Retries transient failures (timeouts, connection
+    errors, 429, 5xx) with a growing pause. Permanent errors like 404 fail
+    immediately."""
+    last_err = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(5 * (2 ** (attempt - 1)))  # 5s, then 10s
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            if e.code == 429 or e.code >= 500:
+                last_err = e
+                print(f"  transient HTTP {e.code}, attempt {attempt + 1} of {attempts}")
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            print(f"  network error ({e}), attempt {attempt + 1} of {attempts}")
+            continue
+    raise last_err
 
 
 def strip_html(text):
@@ -113,6 +134,21 @@ def main():
             items = candidate_items
             break
         if items is None:
+            # Every source failed even after retries. If the saved data is
+            # recent, keep it and exit clean: the next scheduled run gets
+            # another shot and nobody needs a failure email over a blip.
+            # Only fail loudly when the data is genuinely going stale.
+            if OUT.exists():
+                try:
+                    saved = json.loads(OUT.read_text(encoding="utf-8"))
+                    updated = datetime.strptime(saved["updated"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                    age_hours = (datetime.now(timezone.utc) - updated).total_seconds() / 3600
+                    if age_hours < 48:
+                        print(f"fetch failed, keeping saved data ({age_hours:.0f}h old); will retry next run")
+                        sys.exit(0)
+                    print(f"fetch failed and saved data is {age_hours:.0f}h old, flagging for attention")
+                except (ValueError, KeyError) as e:
+                    print("fetch failed and saved data unreadable:", e)
             probe_directory()
             sys.exit(1)
 
