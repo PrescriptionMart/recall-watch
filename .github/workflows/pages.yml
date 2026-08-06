@@ -27,4 +27,13 @@ jobs:
         with:
           path: .
       - id: deployment
+        continue-on-error: true
         uses: actions/deploy-pages@v4
+        with:
+          timeout: 900000
+      - name: Retry deploy once if Pages was slow
+        if: steps.deployment.outcome == 'failure'
+        id: deployment_retry
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 900000
