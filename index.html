@@ -98,6 +98,8 @@
   }
   .when { font-size: 14px; color: #5c6672; white-space: nowrap; }
   .why { font-size: 14px; color: #3d4652; width: 100%; margin: -4px 0 0; }
+  .src { font-size: 12.5px; color: #5c6672; width: 100%; margin: -6px 0 0; }
+  .src a { color: #1B4F8A; }
   .pill {
     font-size: 11.5px;
     font-weight: 700;
@@ -203,6 +205,7 @@
     .drug { font-size: 16px; }
     .when { width: 100%; order: 4; font-size: 13px; }
     .why { order: 5; }
+    .src { order: 5; }
     .toggle { order: 6; }
     button.gotit, button.copyb { order: 7; margin-left: 0; margin-right: 8px; padding: 11px 18px; }
     footer { padding: 0 14px 34px; }
@@ -499,7 +502,13 @@
                      ['Lots', r.code_info || ''], ['Recall number', r.recall_number || 'n/a'],
                      ['Status', r.status || '']],
               num: r.recall_number || 'n/a',
-              date: r.recall_initiation_date || r.report_date || ''
+              date: r.recall_initiation_date || r.report_date || '',
+              srcText: 'FDA Enforcement Report' + (r.report_date ? ' of ' + pretty(r.report_date) : '') +
+                (r.recall_number ? ', recall ' + r.recall_number : ''),
+              srcLinks: (r.recall_number ? [{ label: 'FDA record',
+                href: 'https://api.fda.gov/drug/enforcement.json?search=recall_number:%22' +
+                  encodeURIComponent(r.recall_number) + '%22' }] : []).concat([{ label: 'Enforcement Report search',
+                href: 'https://www.accessdata.fda.gov/scripts/ires/index.cfm' }])
             };
           } else {
             hits.forEach(function (h) {
@@ -549,7 +558,16 @@
     var n = w.items.length;
     var aliases = ['ea|' + w.dk + '|' + w.start];
     w.items.forEach(function (it) { if (aliases.indexOf(it.weekKey) === -1) aliases.push(it.weekKey); });
+    var outlets = [];
+    w.items.slice().reverse().forEach(function (it) {
+      var name = it.src || 'news report';
+      if (!outlets.some(function (o) { return o.label === name; })) outlets.push({ label: name, href: it.link });
+    });
     return {
+      srcText: outlets.length > 3 ? 'news coverage, ' + outlets.length + ' outlets:' : 'news coverage:',
+      srcLinks: outlets.slice(0, 3),
+      srcMore: outlets.length > 3 ? outlets.length - 3 : 0,
+      srcFirst: outlets[0] ? outlets[0].label : 'news report',
       key: aliases[0], aliases: aliases, earlyAlert: true,
       label: newest.hits.join(', '), hits: newest.hits, tier: tierOf(newest.hits.join(' ')),
       cls: '', reason: newest.head, date: w.start, link: newest.link, num: 'not yet assigned',
@@ -740,6 +758,24 @@
     why.textContent = r.reason.length > 150 ? r.reason.slice(0, 150) + '...' : r.reason;
     row.appendChild(why);
 
+    // Where this came from, always visible, so anyone can check it.
+    var src = document.createElement('p');
+    src.className = 'src';
+    src.appendChild(document.createTextNode('Source: ' + r.srcText + (r.earlyAlert ? ' ' : '  |  ')));
+    r.srcLinks.forEach(function (l, i) {
+      if (i) src.appendChild(document.createTextNode(r.earlyAlert ? ', ' : '  |  '));
+      var href = safeLink(l.href);
+      if (href) {
+        var a = document.createElement('a');
+        a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.textContent = l.label;
+        src.appendChild(a);
+      } else {
+        src.appendChild(document.createTextNode(l.label));
+      }
+    });
+    if (r.srcMore) src.appendChild(document.createTextNode(' and ' + r.srcMore + ' more'));
+    row.appendChild(src);
+
     var t = document.createElement('button');
     t.className = 'toggle';
     t.type = 'button';
@@ -838,7 +874,9 @@
     }
     if (r.tier === 'heavy') parts.push('It is everywhere, expect calls.');
     else if (r.tier === 'spec') parts.push('Few patients, but they always call.');
-    parts.push(r.earlyAlert ? 'Watch fda.gov for the official notice.' : 'Details: fda.gov, recall ' + r.num + '.');
+    parts.push(r.earlyAlert
+      ? 'Source: ' + r.srcFirst + ' news report. Watch fda.gov for the official notice.'
+      : 'Source: ' + r.srcText + '.');
     return parts.join(' ');
   }
 
