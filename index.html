@@ -235,14 +235,14 @@
 
   <details class="setup">
     <summary>Medications being watched</summary>
-    <p class="hint">One per line, brand and generic on separate lines. This is a list of drugs patients call about, not a list of what we stock. Leaving a drug on here after we stop carrying it is the right call: the levothyroxine recall generated calls from patients we had not filled in months.</p>
+    <p class="hint">One per line, brand and generic on separate lines. This is a list of drugs patients call about, not a list of what we stock. Leaving a drug on here after we stop carrying it is the right call: the levothyroxine recall generated calls from patients we had not filled in months. IV and infusion products are left off automatically; self-injected pens, autoinjectors, and prefilled syringes stay on.</p>
     <textarea id="watchlist" spellcheck="false"></textarea>
     <p class="hint">Saved in this browser on this computer. <button class="toggle" id="resetBtn" type="button">Reset to the default list</button></p>
   </details>
 </main>
 
 <footer>
-  Source: FDA openFDA drug enforcement database plus a news watch for recall coverage, public data only, no patient information. Early alerts are news stories matched to the watch list before FDA posts the classified entry, so confirm them on fda.gov, and the same recall may appear again later as a classified entry. Call volume ratings are a rough guide based on how widely a drug is prescribed, not on our dispensing data. Send clinical questions to a pharmacist.
+  Source: FDA openFDA drug enforcement database plus a news watch for FDA drug recall coverage, refreshed every 4 hours. Public data only, no patient information. Early alerts are news stories matched to the watch list before FDA posts its classified entry; once that entry appears, it replaces the news card. IV and infusion products are excluded. Call volume ratings are a rough guide based on how widely a drug is prescribed, not on our dispensing data. Confirm any recall on fda.gov before acting on it, and send clinical questions to a pharmacist.
 </footer>
 
 <script>
@@ -294,7 +294,50 @@
   var el = function (id) { return document.getElementById(id); };
   var recalls = [], seen = load(LS_SEEN, {});
   var notified = load(LS_NOTIFIED, {});
-  var lastFailed = 0;
+  var lastFailed = 0, fdaDown = false, hiddenIV = 0;
+  var newsUpdated = null, newsLoaded = false;
+
+  // IV and infusion products (hospital bags, drips, premixes) are left off
+  // the board: our patients do not get them from us and do not call about
+  // them. Self-injected products (pens, autoinjectors, prefilled syringes)
+  // stay, because those patients do call. Deliberately narrow: only an
+  // explicit IV or infusion signal excludes a recall.
+  var IV_RE = /intravenous|\binfusion|\binfuse|\bpremix|piggyback|\bin (?:0\.9%\s*)?sodium chloride\b|\bin (?:\d+(?:\.\d+)?%\s*)?dextrose\b|flexible container|viaflex|\biv (?:bag|use|push|solution|fluid)/i;
+  var IV_CAPS_RE = /\bI\.?V\.?\b/;
+  var SELF_INJECT_RE = /\bpens?\b|auto-?injector|pre-?filled (?:pen|syringe)|kwikpen|flextouch|solostar|sensoready|sureclick/i;
+  function isIVorInfusion(text) {
+    if (!text || SELF_INJECT_RE.test(text)) return false;
+    return IV_RE.test(text) || IV_CAPS_RE.test(text);
+  }
+
+  // Whole-word matching, so "citalopram" does not match inside
+  // "escitalopram" and label the wrong drug.
+  function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  function matchers(list) {
+    return list.map(function (t) {
+      return { term: t, re: new RegExp('(^|[^a-z0-9])' + escapeRe(t.toLowerCase()) + '(?![a-z0-9])') };
+    });
+  }
+  function hitsIn(ms, text) {
+    var low = (text || '').toLowerCase(), out = [];
+    ms.forEach(function (m) { if (m.re.test(low)) out.push(m.term); });
+    return out;
+  }
+  var HEAVY_M = null, SPEC_M = null;
+
+  // News feed text arrives with HTML entities like &nbsp; still in it.
+  var decoder = document.createElement('textarea');
+  function cleanText(s) {
+    decoder.innerHTML = s || '';
+    return decoder.value.replace(/\s+/g, ' ').trim();
+  }
+  function splitHeadline(title) {
+    var i = title.lastIndexOf(' - ');
+    return i > 20 ? { head: title.slice(0, i), src: title.slice(i + 3) } : { head: title, src: '' };
+  }
+  function safeLink(u) { return /^https?:\/\//i.test(u || '') ? u : ''; }
+  function ymdToDate(s) { return new Date(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)); }
+  function daysApart(a, b) { return Math.round((ymdToDate(b) - ymdToDate(a)) / 86400000); }
 
   function load(k, dflt) {
     try {
@@ -308,9 +351,9 @@
   }
 
   function tierOf(name) {
-    var n = name.toLowerCase();
-    for (var i = 0; i < HEAVY.length; i++) if (n.indexOf(HEAVY[i]) !== -1) return 'heavy';
-    for (var j = 0; j < SPEC.length; j++) if (n.indexOf(SPEC[j]) !== -1) return 'spec';
+    if (!HEAVY_M) { HEAVY_M = matchers(HEAVY); SPEC_M = matchers(SPEC); }
+    if (hitsIn(HEAVY_M, name).length) return 'heavy';
+    if (hitsIn(SPEC_M, name).length) return 'spec';
     return 'light';
   }
   function tierRank(t) { return t === 'heavy' ? 0 : (t === 'spec' ? 1 : 2); }
@@ -351,16 +394,28 @@
     return out;
   }
 
-  function fetchBatch(group, from, to) {
+  // Newest first, and page past FDA's 100-record cap (up to 300) so a busy
+  // stretch never silently drops the most recent recalls.
+  function fetchBatch(group, from, to, skip, acc) {
+    skip = skip || 0; acc = acc || [];
     var q = group.map(function (t) { return 'product_description:"' + t + '"'; }).join('+OR+');
     var url = 'https://api.fda.gov/drug/enforcement.json?search=(' + q +
-      ')+AND+report_date:[' + from + '+TO+' + to + ']&limit=100';
+      ')+AND+report_date:[' + from + '+TO+' + to + ']&sort=report_date:desc&limit=100' +
+      (skip ? '&skip=' + skip : '');
     return fetch(url, { cache: 'no-store' }).then(function (r) {
       if (r.status === 404) return { results: [] };
       if (r.status === 429) throw new Error('FDA is rate limiting, try again in a minute');
       if (!r.ok) throw new Error('FDA returned ' + r.status);
       return r.json();
-    }).then(function (d) { return (d && d.results) || []; });
+    }).then(function (d) {
+      var rows = (d && d.results) || [];
+      acc = acc.concat(rows);
+      var total = d && d.meta && d.meta.results && d.meta.results.total;
+      if (rows.length === 100 && total > skip + 100 && skip < 200) {
+        return fetchBatch(group, from, to, skip + 100, acc);
+      }
+      return acc;
+    });
   }
 
   function check() {
@@ -375,65 +430,81 @@
 
     var days = 180, end = new Date();
     var from = ymd(new Date(end.getTime() - days * 86400000)), to = ymd(end);
-    var found = {}, failed = 0;
+    var found = {}, early = [], failed = 0, hidden = {};
     var groups = batches(list, 15);
+    var ms = matchers(list);
 
-    // Early alerts: FDA's announcement feed, fetched by a scheduled job in
-    // this site's repository and saved as alerts.json. These appear days or
-    // weeks before the classified database entry. Missing file (for example
-    // when this page runs as a local file) is fine, we just skip it.
+    // Early alerts: news coverage of FDA drug recalls, fetched every 4 hours
+    // by a scheduled job in this site's repository and saved as alerts.json.
+    // Coverage usually lands days or weeks before FDA's classified entry.
+    // A missing file (for example when this page runs as a local file) is
+    // fine, we just skip it.
     var earlyJob = fetch('alerts.json', { cache: 'no-store' }).then(function (r) {
       if (!r.ok) return null;
       return r.json();
     }).then(function (data) {
       if (!data || !data.items) return;
+      newsLoaded = true;
+      newsUpdated = data.updated || null;
+      var byDrugs = {};
       data.items.forEach(function (it) {
-        var text = ((it.title || '') + ' ' + (it.summary || '')).toLowerCase();
-        var hits = list.filter(function (t) { return text.indexOf(t.toLowerCase()) !== -1; });
+        var title = cleanText(it.title), summary = cleanText(it.summary);
+        var hits = hitsIn(ms, title + ' ' + summary);
         if (!hits.length) return;
-        // Cluster by drug and week so ten outlets covering one recall make
-        // one card, and a genuinely new recall months later flags fresh.
-        var dateYmd = (it.date || '').replace(/-/g, '').slice(0, 8);
-        var wk = 0;
-        if (dateYmd.length === 8) {
-          var dt = new Date(+dateYmd.slice(0, 4), +dateYmd.slice(4, 6) - 1, +dateYmd.slice(6, 8));
-          wk = Math.floor(dt.getTime() / 604800000);
-        }
-        var key = 'ea|' + hits.slice().sort().join(',') + '|' + wk;
-        if (found[key]) return; // items arrive newest first, keep that headline
-        found[key] = {
-          key: key, label: hits.join(', '), tier: tierOf(hits.join(' ')),
-          cls: '', earlyAlert: true,
-          reason: it.title || '',
-          firm: '', product: it.summary || it.title || '',
-          lots: '', num: 'not yet assigned', status: 'In the news',
-          date: dateYmd,
-          link: it.link || ''
-        };
+        var dk = hits.slice().sort().join(',');
+        if (isIVorInfusion(title + ' ' + summary)) { hidden['news|' + dk] = true; return; }
+        var d = (it.date || '').replace(/-/g, '').slice(0, 8);
+        if (d.length !== 8) return;
+        var sp = splitHeadline(title);
+        (byDrugs[dk] = byDrugs[dk] || []).push({
+          head: sp.head, src: it.source || sp.src, link: safeLink(it.link), date: d, hits: hits,
+          // Key format used before waves existed, so earlier Got it clicks still count.
+          weekKey: 'ea|' + dk + '|' + Math.floor(ymdToDate(d).getTime() / 604800000)
+        });
+      });
+      // One card per wave of coverage: stories about the same drugs belong
+      // together until coverage goes quiet for more than 30 days. Ten outlets
+      // and the roundups that trail them by weeks make one card; a new recall
+      // after a quiet month is a new card.
+      Object.keys(byDrugs).forEach(function (dk) {
+        var items = byDrugs[dk].sort(function (a, b) { return a.date.localeCompare(b.date); });
+        var wave = null;
+        items.forEach(function (it) {
+          if (!wave || daysApart(wave.last, it.date) > 30) {
+            wave = { dk: dk, start: it.date, last: it.date, items: [] };
+            early.push(wave);
+          }
+          wave.items.push(it);
+          wave.last = it.date;
+        });
       });
     }).catch(function () {});
 
     var jobs = groups.map(function (group) {
+      var gm = matchers(group);
       return fetchBatch(group, from, to).then(function (rows) {
         rows.forEach(function (r) {
           var desc = r.product_description || '';
-          var low = desc.toLowerCase();
-          var hits = group.filter(function (t) { return low.indexOf(t.toLowerCase()) !== -1; });
-          var label = hits.length ? hits.join(', ') : desc.slice(0, 40);
+          var hits = hitsIn(gm, desc);
           var key = r.recall_number || (r.recalling_firm + '|' + desc.slice(0, 50));
+          if (isIVorInfusion(desc)) { hidden[key] = true; return; }
           if (!found[key]) {
             found[key] = {
-              key: key, label: label,
+              key: key, label: hits.length ? hits.join(', ') : desc.slice(0, 40),
+              hits: hits,
               tier: tierOf(hits.length ? hits.join(' ') : desc),
               cls: r.classification || '',
               reason: r.reason_for_recall || 'Reason not stated',
-              firm: r.recalling_firm || 'Unknown', product: desc,
-              lots: r.code_info || '', num: r.recall_number || 'n/a',
-              status: r.status || '',
+              rows: [['Product', desc], ['Firm', r.recalling_firm || 'Unknown'],
+                     ['Lots', r.code_info || ''], ['Recall number', r.recall_number || 'n/a'],
+                     ['Status', r.status || '']],
+              num: r.recall_number || 'n/a',
               date: r.recall_initiation_date || r.report_date || ''
             };
-          } else if (hits.length && found[key].label.indexOf(hits[0]) === -1) {
-            found[key].label += ', ' + hits.join(', ');
+          } else {
+            hits.forEach(function (h) {
+              if (found[key].hits.indexOf(h) === -1) { found[key].hits.push(h); found[key].label += ', ' + h; }
+            });
           }
         });
       }).catch(function () { failed++; });
@@ -441,17 +512,23 @@
     jobs.push(earlyJob);
 
     Promise.all(jobs).then(function () {
-      // Every batch failed. Never let a dead connection look like an all-clear.
-      if (failed === groups.length) {
-        recalls = [];
-        el('results').innerHTML = '';
-        el('meta').textContent = '';
-        verdict('loud', 'Could not reach FDA',
-          'This is not an all-clear, it means the check did not run. Check the internet connection and press Check again.');
-        el('checkBtn').disabled = false;
-        return;
-      }
-      recalls = Object.keys(found).map(function (k) { return found[k]; });
+      fdaDown = failed === groups.length;
+      lastFailed = failed;
+      hiddenIV = Object.keys(hidden).length;
+      var classified = Object.keys(found).map(function (k) { return found[k]; });
+
+      // Once FDA posts the classified entry, it replaces the news card for
+      // the same drug: same recall, now with a class and lot numbers.
+      var waves = early.filter(function (w) {
+        var drugs = w.dk.split(',');
+        return !classified.some(function (c) {
+          if (!c.date || c.date.length !== 8) return false;
+          var shares = c.hits.some(function (h) { return drugs.indexOf(h) !== -1; });
+          return shares && daysApart(c.date, w.start) <= 45 && daysApart(w.last, c.date) <= 14;
+        });
+      });
+
+      recalls = classified.concat(waves.map(earlyCard));
       recalls.sort(function (a, b) {
         var an = isNew(a) ? 0 : 1, bn = isNew(b) ? 0 : 1;
         if (an !== bn) return an - bn;
@@ -459,14 +536,39 @@
         if (tr !== 0) return tr;
         return (b.date || '').localeCompare(a.date || '');
       });
-      save(LS_LAST, new Date().toISOString());
+      // A check where FDA never answered does not count as a check.
+      if (!fdaDown) save(LS_LAST, new Date().toISOString());
       maybeNotify();
-      render(failed);
+      render();
       el('checkBtn').disabled = false;
     });
   }
 
-  function isNew(r) { return !seen[r.key]; }
+  function earlyCard(w) {
+    var newest = w.items[w.items.length - 1];
+    var n = w.items.length;
+    var aliases = ['ea|' + w.dk + '|' + w.start];
+    w.items.forEach(function (it) { if (aliases.indexOf(it.weekKey) === -1) aliases.push(it.weekKey); });
+    return {
+      key: aliases[0], aliases: aliases, earlyAlert: true,
+      label: newest.hits.join(', '), hits: newest.hits, tier: tierOf(newest.hits.join(' ')),
+      cls: '', reason: newest.head, date: w.start, link: newest.link, num: 'not yet assigned',
+      rows: [
+        ['Coverage', n + (n === 1 ? ' story, ' : ' stories, ') + (w.start === w.last
+          ? pretty(w.start) : pretty(w.start) + ' to ' + pretty(w.last))],
+        ['Latest from', newest.src],
+        ['Recall number', 'not yet assigned, FDA has not posted the official entry']
+      ]
+    };
+  }
+
+  // A card counts as reviewed if any of its keys was marked. News cards
+  // carry several keys so a Got it survives new stories joining the wave.
+  function keysOf(r) { return r.aliases || [r.key]; }
+  function isNew(r) { return !keysOf(r).some(function (k) { return seen[k]; }); }
+  function markSeen(r, on) {
+    keysOf(r).forEach(function (k) { if (on) seen[k] = true; else delete seen[k]; });
+  }
 
   function verdict(kind, head, sub) {
     el('verdict').className = 'verdict ' + kind;
@@ -474,7 +576,7 @@
     el('vsub').textContent = sub;
   }
 
-  function render(failed) {
+  function render() {
     var fresh = recalls.filter(isNew);
     var loud = fresh.filter(function (r) { return r.tier === 'heavy'; });
     var spec = fresh.filter(function (r) { return r.tier === 'spec'; });
@@ -495,8 +597,14 @@
       verdict('some', fresh.length + ' new recall' + (fresh.length === 1 ? '' : 's'),
         'None on our heaviest drugs, so calls should be light.');
     }
+    // Never let a dead connection look like an all-clear. News alerts still
+    // show, because they matter most exactly when FDA is unreachable.
+    if (fdaDown) {
+      verdict('loud', 'Could not reach FDA', recalls.length
+        ? 'This is not an all-clear. News alerts below still loaded, but the FDA database check did not run. Press Check again in a minute.'
+        : 'This is not an all-clear, it means the check did not run. Check the internet connection and press Check again.');
+    }
 
-    lastFailed = failed;
     updateMeta();
 
     var box = el('results');
@@ -516,9 +624,9 @@
       back.style.margin = '0 0 12px';
       back.textContent = 'Bring all back';
       back.addEventListener('click', function () {
-        seenList.forEach(function (r) { delete seen[r.key]; });
+        seenList.forEach(function (r) { markSeen(r, false); });
         save(LS_SEEN, seen);
-        render(0);
+        render();
       });
       det.appendChild(back);
       seenList.forEach(function (r, i) { det.appendChild(cardFor(r, 's' + i)); });
@@ -532,14 +640,22 @@
     if (s < 90) return 'just now';
     if (s < 3600) return Math.round(s / 60) + ' min ago';
     if (s < 86400) { var h = Math.round(s / 3600); return h + (h === 1 ? ' hour ago' : ' hours ago'); }
-    return new Date(iso).toLocaleString();
+    var dd = Math.round(s / 86400);
+    return dd + (dd === 1 ? ' day ago' : ' days ago');
   }
 
   function updateMeta() {
-    var m = el('meta');
-    m.textContent = 'Checked ' + relTime(load(LS_LAST, null)) +
-      (lastFailed ? '  |  ' + lastFailed + ' batch(es) failed to load' : '');
-    m.className = lastFailed ? 'meta err' : 'meta';
+    var m = el('meta'), parts = ['Checked ' + relTime(load(LS_LAST, null))], warn = false;
+    if (lastFailed && !fdaDown) { parts.push(lastFailed + ' FDA batch(es) failed, press Check again'); warn = true; }
+    if (hiddenIV) parts.push(hiddenIV + ' IV or infusion recall' + (hiddenIV === 1 ? '' : 's') + ' hidden');
+    if (newsUpdated) {
+      var hrs = (Date.now() - new Date(newsUpdated).getTime()) / 3600000;
+      if (hrs > 24) { parts.push('news watch last updated ' + relTime(newsUpdated)); warn = true; }
+    } else if (!newsLoaded && /^https?:/.test(location.protocol)) {
+      parts.push('news watch did not load'); warn = true;
+    }
+    m.textContent = parts.join('  |  ');
+    m.className = warn ? 'meta err' : 'meta';
   }
 
   // ---- notifications: only fires while the page is open somewhere ----
@@ -567,9 +683,11 @@
 
   function maybeNotify() {
     if (!('Notification' in window) || Notification.permission !== 'granted' || !notifWanted()) return;
-    var fresh = recalls.filter(function (r) { return isNew(r) && !notified[r.key]; });
+    var fresh = recalls.filter(function (r) {
+      return isNew(r) && !keysOf(r).some(function (k) { return notified[k]; });
+    });
     if (!fresh.length) return;
-    fresh.forEach(function (r) { notified[r.key] = true; });
+    fresh.forEach(function (r) { keysOf(r).forEach(function (k) { notified[k] = true; }); });
     save(LS_NOTIFIED, notified);
     var heavy = fresh.some(function (r) { return r.tier === 'heavy'; });
     var body = (fresh.length === 1 ? 'New recall: ' : 'New recalls: ') +
@@ -582,7 +700,8 @@
   }
 
   function namesOf(arr) {
-    var n = arr.map(function (r) { return r.label.split(',')[0]; });
+    var n = arr.map(function (r) { return r.label.split(',')[0]; })
+      .filter(function (x, i, a) { return a.indexOf(x) === i; });
     if (n.length <= 2) return n.join(' and ');
     return n.slice(0, 2).join(', ') + ' and ' + (n.length - 2) + ' more';
   }
@@ -643,14 +762,14 @@
         flip.disabled = true;
         c.classList.add('leaving');
         setTimeout(function () {
-          seen[r.key] = true;
+          markSeen(r, true);
           save(LS_SEEN, seen);
-          render(lastFailed);
+          render();
         }, 240);
       } else {
-        delete seen[r.key];
+        markSeen(r, false);
         save(LS_SEEN, seen);
-        render(lastFailed);
+        render();
       }
     });
     row.appendChild(flip);
@@ -660,8 +779,7 @@
     var d = document.createElement('div');
     d.className = 'details';
     d.id = 'd' + i;
-    [['Product', r.product], ['Firm', r.firm], ['Lots', r.lots],
-     ['Recall number', r.num], ['Status', r.status]].forEach(function (pair) {
+    r.rows.forEach(function (pair) {
       if (!pair[1]) return;
       var line = document.createElement('div');
       var b = document.createElement('b');
@@ -673,13 +791,13 @@
     if (r.link) {
       var ll = document.createElement('div');
       var lb = document.createElement('b');
-      lb.textContent = 'Coverage: ';
+      lb.textContent = 'Story: ';
       ll.appendChild(lb);
       var a = document.createElement('a');
       a.href = r.link;
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = 'open the news story';
+      a.textContent = 'open the latest story';
       ll.appendChild(a);
       d.appendChild(ll);
     }
@@ -711,7 +829,7 @@
     if (r.earlyAlert) {
       var title = (r.reason || '').trim();
       if (title.length > 160) title = title.slice(0, 160) + '...';
-      parts.push('Recall heads up: ' + r.label + ', in the news ' + pretty(r.date) + '. FDA has not posted the official entry yet.');
+      parts.push('Recall heads up: ' + r.label + ', in the news since ' + pretty(r.date) + '. FDA has not posted the official entry yet.');
       if (title) parts.push('Headline: "' + title + '".');
     } else {
       parts.push('Recall heads up: ' + r.label + (r.cls ? ' (' + r.cls + ')' : '') + ', posted ' + pretty(r.date) + '.');
@@ -755,9 +873,9 @@
   });
   el('checkBtn').addEventListener('click', check);
   el('seenBtn').addEventListener('click', function () {
-    recalls.forEach(function (r) { seen[r.key] = true; });
+    recalls.forEach(function (r) { markSeen(r, true); });
     save(LS_SEEN, seen);
-    render(lastFailed);
+    render();
   });
   el('notifBtn').addEventListener('click', toggleNotif);
   updateNotifBtn();

@@ -16,6 +16,7 @@ import re
 import sys
 import time
 import email.utils
+import html
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -69,7 +70,9 @@ def http_get(url, attempts=3):
 
 
 def strip_html(text):
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text or "")).strip()
+    """Drop tags and decode entities like &nbsp; so the page shows clean text."""
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text or ""))
+    return re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
 
 
 def parse(xml_text):
@@ -89,8 +92,14 @@ def parse(xml_text):
             continue
         if when < cutoff or not title:
             continue
+        # Google News titles end in " - Outlet"; keep the outlet separately.
+        source = ""
+        cut = title.rfind(" - ")
+        if cut > 20:
+            source = title[cut + 3:]
         items.append({
             "title": title,
+            "source": source,
             "link": link,
             "date": when.strftime("%Y-%m-%d"),
             "summary": summary,
