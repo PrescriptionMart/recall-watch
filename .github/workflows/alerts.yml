@@ -21,7 +21,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Fetch FDA announcement feed
         run: python3 .github/scripts/fetch_alerts.py
       - name: Commit if changed
@@ -38,20 +38,20 @@ jobs:
             echo "changed=no" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.commit.outputs.changed == 'yes'
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - if: steps.commit.outputs.changed == 'yes'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: .
       - if: steps.commit.outputs.changed == 'yes'
         id: deployment
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           timeout: 900000
       - name: Retry deploy once if Pages was slow
         if: steps.commit.outputs.changed == 'yes' && steps.deployment.outcome == 'failure'
         id: deployment_retry
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           timeout: 900000
