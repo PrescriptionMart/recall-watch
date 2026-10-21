@@ -294,6 +294,22 @@
     'Dupixent','apremilast','Otezla','lenalidomide','Revlimid','ibrutinib','Imbruvica'
   ];
 
+  // Drugs added to the default list after people already had a saved list.
+  // Each round merges into saved lists once, so new defaults reach everyone
+  // without overwriting their own edits. Add a new round, never edit an old
+  // one: a drug someone deletes after its round has merged stays deleted.
+  var LIST_UPDATES = [
+    { round: 2, note: 'nebulizer drugs', drugs: [
+      'formoterol', 'Perforomist', 'arformoterol', 'Brovana', 'ipratropium', 'DuoNeb',
+      'levalbuterol', 'Xopenex', 'revefenacin', 'Yupelri', 'Pulmicort'
+    ] }
+  ];
+  LIST_UPDATES.forEach(function (u) {
+    u.drugs.forEach(function (d) { if (DEFAULT_LIST.indexOf(d) === -1) DEFAULT_LIST.push(d); });
+  });
+  var LIST_ROUND = LIST_UPDATES.reduce(function (m, u) { return Math.max(m, u.round); }, 1);
+  var LS_ROUND = 'pmRecallListRound';
+
   var el = function (id) { return document.getElementById(id); };
   var recalls = [], seen = load(LS_SEEN, {});
   var notified = load(LS_NOTIFIED, {});
@@ -672,6 +688,7 @@
     } else if (!newsLoaded && /^https?:/.test(location.protocol)) {
       parts.push('news watch did not load'); warn = true;
     }
+    if (listNote) parts.push(listNote);
     m.textContent = parts.join('  |  ');
     m.className = warn ? 'meta err' : 'meta';
   }
@@ -900,9 +917,31 @@
   }
 
   // init
-  var savedList = null;
+  var savedList = null, listNote = '';
   try { savedList = localStorage.getItem(LS_LIST); } catch (e) {}
-  el('watchlist').value = (savedList && savedList.trim()) ? savedList : DEFAULT_LIST.join('\n');
+  if (savedList && savedList.trim()) {
+    // Merge in any default drugs added since this browser last saw the list.
+    var have = {}, added = [], notes = [];
+    savedList.split('\n').forEach(function (l) { have[l.trim().toLowerCase()] = true; });
+    var round = +load(LS_ROUND, 1) || 1;
+    LIST_UPDATES.forEach(function (u) {
+      if (u.round <= round) return;
+      var n = 0;
+      u.drugs.forEach(function (d) {
+        if (!have[d.toLowerCase()]) { added.push(d); have[d.toLowerCase()] = true; n++; }
+      });
+      if (n) notes.push(n + ' ' + u.note);
+    });
+    if (added.length) {
+      savedList = savedList.replace(/\s+$/, '') + '\n' + added.join('\n');
+      save(LS_LIST, savedList);
+      listNote = 'Added ' + notes.join(' and ') + ' to your watch list.';
+    }
+    el('watchlist').value = savedList;
+  } else {
+    el('watchlist').value = DEFAULT_LIST.join('\n');
+  }
+  save(LS_ROUND, String(LIST_ROUND));
   el('watchlist').addEventListener('input', function () { save(LS_LIST, el('watchlist').value); });
 
   el('resetBtn').addEventListener('click', function () {
